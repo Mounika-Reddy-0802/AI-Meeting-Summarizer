@@ -1,0 +1,183 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Zoom Live Summarizer — serverless backend
+
+Parameters:
+  CognitoUserPoolArn: { Type: String }
+  CognitoDomain:      { Type: String }
+  AppOrigin:          { Type: String, Default: 'http://localhost:3000' }
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Timeout: 20
+    MemorySize: 256
+    Architectures: [arm64]
+    Environment:
+      Variables:
+        MEETINGS_TABLE:     !Ref MeetingsTable
+        ACTION_ITEMS_TABLE: !Ref ActionItemsTable
+        AUDIO_BUCKET:       !Ref AudioBucket
+        APP_ORIGIN:         !Ref AppOrigin
+
+Resources:
+
+  # ----- Storage -----
+  AudioBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods: [PUT, POST, GET]
+            AllowedOrigins: [!Ref AppOrigin]
+            AllowedHeaders: ['*']
+
+  MeetingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: userId,    AttributeType: S }
+        - { AttributeName: meetingId, AttributeType: S }
+        - { AttributeName: timestamp, AttributeType: N }
+      KeySchema:
+        - { AttributeName: userId,    KeyType: HASH }
+        - { AttributeName: meetingId, KeyType: RANGE }
+      GlobalSecondaryIndexes:
+        - IndexName: byTimestamp
+          KeySchema:
+            - { AttributeName: userId,    KeyType: HASH }
+            - { AttributeName: timestamp, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+
+  ActionItemsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: meetingId, AttributeType: S }
+        - { AttributeName: itemId,    AttributeType: S }
+      KeySchema:
+        - { AttributeName: meetingId, KeyType: HASH }
+        - { AttributeName: itemId,    KeyType: RANGE }
+
+  # ----- API -----
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      Cors:
+        AllowOrigin: !Sub "'${AppOrigin}'"
+        AllowHeaders: "'Authorization,Content-Type'"
+        AllowMethods: "'GET,POST,OPTIONS'"
+      Auth:
+        DefaultAuthorizer: CognitoAuth
+        Authorizers:
+          CognitoAuth:
+            UserPoolArn: !Ref CognitoUserPoolArn
+        AddDefaultAuthorizerToCorsPreflight: false
+
+  # ----- Functions -----
+  ZoomSignatureFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambdas/zoom-signature/
+      Handler: index.handler
+      Policies:
+        - SSMParameterReadPolicy: { ParameterName: zoom/sdk-key }
+        - SSMParameterReadPolicy: { ParameterName: zoom/sdk-secret }
+      Events:
+        Post:
+          Type: Api
+          Properties: { RestApiId: !Ref Api, Path: /zoom-signature, Method: post }
+
+  UploadAudioFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambdas/upload-audio/
+      Handler: index.handler
+      Policies:
+        - S3WritePolicy: { BucketName: !Ref AudioBucket }
+      Events:
+        Post:
+          Type: Api
+          Properties: { RestApiId: !Ref Api, Path: /upload-audio, Method: post }
+
+  SaveTranscriptFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambdas/save-transcript/
+      Handler: index.handler
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref MeetingsTable }
+      Events:
+        Post:
+          Type: Api
+          Properties: { RestApiId: !Ref Api, Path: /save-transcript, Method: post }
+
+  GenerateSummaryFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambdas/generate-summary/
+      Handler: index.handler
+      Timeout: 60
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref MeetingsTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref ActionItemsTable }
+        - SSMParameterReadPolicy: { ParameterName: gemini/api-key }
+      Events:
+        Post:
+          Type: Api
+          Properties: { RestApiId: !Ref Api, Path: /generate-summary, Method: post }
+
+  ListMeetingsFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambdas/list-meetings/
+      Handler: index.handler
+      Policies:
+        - DynamoDBReadPolicy: { TableName: !Ref MeetingsTable }
+      Events:
+        Get:
+          Type: Api
+          Properties: { RestApiId: !Ref Api, Path: /meetings, Method: get }
+
+  GetMeetingFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambdas/get-meeting/
+      Handler: index.handler
+      Policies:
+        - DynamoDBReadPolicy: { TableName: !Ref MeetingsTable }
+        - DynamoDBReadPolicy: { TableName: !Ref ActionItemsTable }
+      Events:
+        Get:
+          Type: Api
+          Properties: { RestApiId: !Ref Api, Path: /meeting/{id}, Method: get }
+
+  SearchFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambdas/search/
+      Handler: index.handler
+      Policies:
+        - DynamoDBReadPolicy: { TableName: !Ref MeetingsTable }
+      Events:
+        Get:
+          Type: Api
+          Properties: { RestApiId: !Ref Api, Path: /search, Method: get }
+
+Outputs:
+  ApiUrl:
+    Description: API Gateway base URL — paste into frontend .env.local
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/prod"
+  AudioBucketName:
+    Value: !Ref AudioBucket

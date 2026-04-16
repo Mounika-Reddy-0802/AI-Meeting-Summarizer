@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Zoom Meeting</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0;
+      height: 100%; width: 100%;
+      background: #1F2937;
+      overflow: hidden;
+    }
+    #meetingSDKElement {
+      width: 100% !important;
+      height: 100vh !important;
+      position: relative;
+    }
+    /* Force Zoom's inner container to fill our root */
+    #meetingSDKElement > div {
+      width: 100% !important;
+      height: 100% !important;
+    }
+    #meetingSDKElement [class*="meeting-app"] {
+      width: 100% !important;
+      height: 100% !important;
+    }
+    /* Ensure toolbar spans full width */
+    #meetingSDKElement [class*="footer"],
+    #meetingSDKElement [class*="toolbar"] {
+      width: 100% !important;
+      z-index: 1000 !important;
+    }
+    #status {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      color: #fff;
+      font-family: -apple-system, sans-serif;
+      text-align: center;
+      z-index: 1;
+      pointer-events: none;
+      max-width: 80%;
+    }
+    #status.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div id="meetingSDKElement"></div>
+  <div id="status">Connecting to Zoom…</div>
+
+  <script src="https://source.zoom.us/3.8.0/lib/vendor/react.min.js"></script>
+  <script src="https://source.zoom.us/3.8.0/lib/vendor/react-dom.min.js"></script>
+  <script src="https://source.zoom.us/3.8.0/lib/vendor/redux.min.js"></script>
+  <script src="https://source.zoom.us/3.8.0/lib/vendor/redux-thunk.min.js"></script>
+  <script src="https://source.zoom.us/3.8.0/lib/vendor/lodash.min.js"></script>
+  <script src="https://source.zoom.us/3.8.0/zoom-meeting-embedded-3.8.0.min.js"></script>
+
+  <script>
+    var client = ZoomMtgEmbedded.createClient();
+    var statusEl = document.getElementById('status');
+    var rootEl = document.getElementById('meetingSDKElement');
+    var pendingData = null;
+
+    function setStatus(msg, hide) {
+      statusEl.textContent = msg || '';
+      statusEl.classList.toggle('hidden', !!hide);
+    }
+
+    function getSize() {
+      var w = window.innerWidth || document.documentElement.clientWidth || 800;
+      var h = window.innerHeight || document.documentElement.clientHeight || 600;
+      return { width: w, height: h };
+    }
+
+    function initAndJoin(d) {
+      setStatus('Initializing Zoom SDK…');
+      var size = getSize();
+
+      client.init({
+        zoomAppRoot: rootEl,
+        language: 'en-US',
+        patchJsMedia: true,
+        leaveOnPageUnload: true,
+        customize: {
+          video: {
+            isResizable: true,
+            popper: { disableDraggable: true },
+            viewSizes: {
+              default: { width: size.width, height: size.height },
+              ribbon: { width: 320, height: size.height }
+            }
+          },
+          chat: { popper: { disableDraggable: true } },
+          meetingInfo: ['topic', 'host', 'mn', 'pwd', 'participant', 'dc', 'enctype'],
+          toolbar: { buttons: [] }
+        }
+      }).then(function () {
+        var joinRole = d.role || 0;
+        setStatus('Joining as ' + (joinRole === 1 ? 'host' : 'participant') + '…');
+
+        client.join({
+          signature: d.signature,
+          sdkKey: d.sdkKey,
+          meetingNumber: String(d.meetingNumber),
+          userName: d.userName || 'Guest',
+          password: d.password || '',
+          tk: '',
+          zak: d.zak || ''
+        }).then(function () {
+          setStatus('', true);
+          parent.postMessage({ type: 'zoom-joined' }, '*');
+
+          // After join, force resize to fill the iframe
+          setTimeout(function () {
+            try {
+              var s = getSize();
+              client.updateVideoOptions({
+                viewSizes: {
+                  default: { width: s.width, height: s.height },
+                  ribbon: { width: 320, height: s.height }
+                }
+              });
+            } catch (e) {}
+          }, 1000);
+        }).catch(function (err) {
+          var reason = (err && (err.reason || err.errorMessage || err.message)) || JSON.stringify(err);
+          setStatus('Join failed: ' + reason);
+          parent.postMessage({ type: 'zoom-error', err: { reason: reason } }, '*');
+        });
+      }).catch(function (err) {
+        var reason = (err && (err.reason || err.errorMessage || err.message)) || JSON.stringify(err);
+        setStatus('Init failed: ' + reason);
+        parent.postMessage({ type: 'zoom-error', err: { reason: reason } }, '*');
+      });
+    }
+
+    window.addEventListener('message', function (e) {
+      var d = e.data || {};
+      if (!d.signature) return;
+      pendingData = d;
+      // Small delay to ensure iframe has final dimensions
+      setTimeout(function () { initAndJoin(d); }, 300);
+    });
+
+    if (client && client.on) {
+      try {
+        client.on('connection-change', function (payload) {
+          if (payload && (payload.state === 'Closed' || payload.state === 'Fail')) {
+            parent.postMessage({ type: 'zoom-left' }, '*');
+          }
+        });
+      } catch (e) {}
+    }
+
+    window.addEventListener('resize', function () {
+      try {
+        var s = getSize();
+        client.updateVideoOptions({
+          viewSizes: {
+            default: { width: s.width, height: s.height },
+            ribbon: { width: 320, height: s.height }
+          }
+        });
+      } catch (e) {}
+    });
+
+    window.addEventListener('beforeunload', function () {
+      try { client.leaveMeeting(); } catch (e) {}
+      parent.postMessage({ type: 'zoom-left' }, '*');
+    });
+  </script>
+</body>
+</html>

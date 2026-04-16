@@ -1,0 +1,9 @@
+{
+  "name": "zoom-signature",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "jsonwebtoken": "^9.0.2",
+    "@aws-sdk/client-ssm": "^3.600.0"
+  }
+}

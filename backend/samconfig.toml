@@ -1,0 +1,8 @@
+version = 0.1
+[default.deploy.parameters]
+stack_name = "zoom-summarizer"
+resolve_s3 = true
+s3_prefix = "zoom-summarizer"
+region = "us-east-1"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
