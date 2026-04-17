@@ -65,7 +65,6 @@ export default function MeetingAssistant({
       stream.getVideoTracks().forEach(t => t.stop());
       streamRef.current = stream;
 
-      // Also record raw audio for S3 upload
       const audioOnlyStream = new MediaStream([audioTrack]);
       try {
         const rec = new MediaRecorder(audioOnlyStream, { mimeType: 'audio/webm;codecs=opus' });
@@ -78,7 +77,6 @@ export default function MeetingAssistant({
         console.warn('MediaRecorder not available for S3 upload:', e);
       }
 
-      // Web Audio pipeline for Deepgram (raw PCM)
       const audioCtx = new AudioContext({ sampleRate: 16000 });
       audioCtxRef.current = audioCtx;
       const source = audioCtx.createMediaStreamSource(new MediaStream([audioTrack]));
@@ -86,7 +84,6 @@ export default function MeetingAssistant({
       const processor = audioCtx.createScriptProcessor(4096, 1, 1);
       processorRef.current = processor;
 
-      // Deepgram WebSocket
       setStatus('Connecting to Deepgram…');
       const url = `wss://api.deepgram.com/v1/listen?` +
         `model=nova-2&encoding=linear16&sample_rate=16000&channels=1&smart_format=true&interim_results=false&punctuate=true`;
@@ -151,10 +148,10 @@ export default function MeetingAssistant({
     const participants = Array.from(new Set(transcript.map(t => t.speaker)));
 
     try {
-      // 1. Upload audio to S3 via pre-signed URL
+      // 1. Upload audio to S3
       let audioKey: string | undefined;
       if (chunksRef.current.length > 0) {
-        setStatus('Uploading audio to S3…');
+        setStatus('Uploading audio…');
         try {
           const { uploadUrl, audioKey: k } = await api.getUploadUrl();
           audioKey = k;
@@ -170,7 +167,7 @@ export default function MeetingAssistant({
       }
 
       // 2. Save transcript to DynamoDB
-      setStatus('Saving transcript to DynamoDB…');
+      setStatus('Saving transcript…');
       const { meetingId } = await api.saveTranscript({
         transcript,
         audioKey,
@@ -181,23 +178,41 @@ export default function MeetingAssistant({
         participants,
       });
 
-      // 3. Generate AI summary via Gemini
-      setStatus('Generating AI summary via Gemini…');
-      const result = await api.generateSummary(meetingId);
-      setSummary(result.summary || '');
-      setActionItems(result.actionItems || []);
-      setStatus('');
+      setStatus('Meeting saved! Generating AI summary…');
+      setBusy(false);
 
-      // 4. Trigger post-meeting popup
-      if (onSummaryReady) {
-        const fullMeeting = await api.getMeeting(meetingId);
-        if (fullMeeting) onSummaryReady(fullMeeting);
-      }
+      // 3. Generate summary in background (don't block UI)
+      api.generateSummary(meetingId)
+        .then(result => {
+          setSummary(result.summary || '');
+          setActionItems(result.actionItems || []);
+          setStatus('Summary ready!');
+          if (onSummaryReady) {
+            api.getMeeting(meetingId).then(m => { if (m) onSummaryReady(m); }).catch(() => {});
+          }
+        })
+        .catch(() => {
+          setStatus('Meeting saved. Checking for summary…');
+          // Retry after 15 seconds — Lambda may have succeeded after API Gateway timed out
+          setTimeout(() => {
+            api.getMeeting(meetingId).then(m => {
+              if (m && m.summary) {
+                setSummary(m.summary);
+                setStatus('Summary ready!');
+                if (onSummaryReady) onSummaryReady(m);
+              } else {
+                setStatus('Meeting saved. Check AI Summariser page later for summary.');
+              }
+            }).catch(() => {
+              setStatus('Meeting saved. Check AI Summariser page later.');
+            });
+          }, 15000);
+        });
+
     } catch (e: any) {
-      console.error('Pipeline failed:', e);
-      alert('Pipeline failed: ' + e.message);
+      console.error('Save failed:', e);
+      alert('Save failed: ' + e.message);
       setStatus('');
-    } finally {
       setBusy(false);
     }
   }
