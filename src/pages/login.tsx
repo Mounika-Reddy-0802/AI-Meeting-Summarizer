@@ -1,12 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
-import { Video } from 'lucide-react';
+import { Video, Key, User, Shield, BookOpen, Info } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 
-const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === 'true';
-
 export default function Login() {
-  const { user, loginWithCredentials, loginWithCognito } = useAuth();
+  const { user, loginWithCredentials } = useAuth();
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -14,19 +12,9 @@ export default function Login() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // If already logged in, go to dashboard
   useEffect(() => {
     if (user) router.replace('/');
   }, [user]);
-
-  // In real mode, redirect to Cognito immediately
-  useEffect(() => {
-    if (!USE_MOCK && !user) {
-      // Small delay to avoid redirect loop
-      const t = setTimeout(() => loginWithCognito(), 500);
-      return () => clearTimeout(t);
-    }
-  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -41,84 +29,118 @@ export default function Login() {
     }
   }
 
-  // In real mode, show a "Redirecting to Cognito…" message
-  if (!USE_MOCK) {
-    return (
-      <div className="zoom-login">
-        <div className="zoom-login-card">
+  function fillDemo(demoEmail: string, demoPass: string) {
+    setEmail(demoEmail);
+    setPassword(demoPass);
+  }
+
+  return (
+    <div className="login-page">
+      {/* Left panel — demo credentials + project info */}
+      <div className="login-left">
+        <div className="demo-section">
+          <div className="demo-header">
+            <Key size={18} />
+            <span>Demo Login Credentials</span>
+          </div>
+          <div className="demo-cards">
+            <button
+              className="demo-card demo-admin"
+              onClick={() => fillDemo('sherymounikareddy.2006@gmail.com', 'MeetingAI@2026')}
+            >
+              <div className="demo-card-icon"><Shield size={16} /></div>
+              <div className="demo-card-label">Host Login</div>
+              <div className="demo-card-detail">Email: <b>sherymounikareddy.2006@gmail.com</b></div>
+              <div className="demo-card-detail">Password: <b>MeetingAI@2026</b></div>
+            </button>
+            <button
+              className="demo-card demo-user"
+              onClick={() => fillDemo('vattipallysreshtareddy@gmail.com', 'Meeting@123')}
+            >
+              <div className="demo-card-icon"><User size={16} /></div>
+              <div className="demo-card-label">Participant Login</div>
+              <div className="demo-card-detail">Email: <b>vattipallysreshtareddy@gmail.com</b></div>
+              <div className="demo-card-detail">Password: <b>Meeting@123</b></div>
+            </button>
+          </div>
+          <p className="demo-hint">Click a card to auto-fill credentials</p>
+        </div>
+
+        <div className="project-section">
+          <div className="project-header">
+            <Info size={18} />
+            <span>Project Information</span>
+          </div>
+          <div className="project-grid">
+            <div className="project-field">
+              <div className="project-label">PROJECT CREDITS</div>
+              <div className="project-value">Mounika Reddy Shery</div>
+              <div className="project-value">Saikrishna Reddy Vattipally</div>
+            </div>
+            <div className="project-field">
+              <div className="project-label">SUPERVISOR</div>
+              <div className="project-value">Dr. Naresh Vurukonda</div>
+            </div>
+            <div className="project-field">
+              <div className="project-label">COURSE</div>
+              <div className="project-value">Virtualization and Cloud Computing</div>
+            </div>
+            <div className="project-field">
+              <div className="project-label">DEPARTMENT</div>
+              <div className="project-value">Department of CSE (Data Science)</div>
+              <div className="project-value">NMIMS Hyderabad Campus</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Right panel — sign in form */}
+      <div className="login-right">
+        <div className="login-form-card">
           <div className="zoom-logo">
             <div className="zoom-logo-icon"><Video size={22} /></div>
             <div className="zoom-logo-text">MeetingAI</div>
           </div>
-          <h2>Redirecting to sign in…</h2>
-          <p style={{ textAlign: 'center', color: '#6B7280' }}>
-            You'll be redirected to the secure login page.
-          </p>
-          <button
-            className="btn-primary"
-            onClick={loginWithCognito}
-            style={{ width: '100%', padding: 12, marginTop: 16 }}
-          >
-            Sign in with Cognito
-          </button>
-        </div>
-      </div>
-    );
-  }
+          <h2>Sign in to your account</h2>
 
-  return (
-    <div className="zoom-login">
-      <div className="zoom-login-card">
-        <div className="zoom-logo">
-          <div className="zoom-logo-icon"><Video size={22} /></div>
-          <div className="zoom-logo-text">MeetingAI</div>
-        </div>
-        <h2>Sign In</h2>
-        <form onSubmit={submit}>
-          <div className="field">
-            <input
-              type="email"
-              placeholder="Email Address"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              required
-              autoFocus
-            />
+          <form onSubmit={submit}>
+            <div className="field">
+              <label>Email address</label>
+              <input
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                required
+                autoFocus
+              />
+            </div>
+            <div className="field">
+              <label>Password</label>
+              <input
+                type="password"
+                placeholder="Enter your password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+              />
+            </div>
+            <div className="links">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="checkbox" checked={keep} onChange={e => setKeep(e.target.checked)} />
+                Stay signed in
+              </label>
+              <a href="#">Forgot?</a>
+            </div>
+            {error && <div className="error">{error}</div>}
+            <button className="login-submit" type="submit" disabled={busy}>
+              {busy ? 'Signing in…' : 'Sign in  →'}
+            </button>
+          </form>
+
+          <div className="login-footer-note">
+            <Shield size={14} />
+            <span>Secure Authentication Process</span>
           </div>
-          <div className="field">
-            <input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-            />
-          </div>
-          <div className="links">
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <input type="checkbox" checked={keep} onChange={e => setKeep(e.target.checked)} />
-              Stay signed in
-            </label>
-            <a href="#">Forgot?</a>
-          </div>
-          {error && <div className="error">{error}</div>}
-          <button className="btn-primary" type="submit" disabled={busy}>
-            {busy ? 'Signing in…' : 'Sign In'}
-          </button>
-        </form>
-        <div className="divider">or sign in with</div>
-        <button className="sso-btn" onClick={loginWithCognito}>
-          <span style={{ fontWeight: 600 }}>SSO</span>
-        </button>
-        <button className="sso-btn" onClick={loginWithCognito}>
-          <span style={{ color: '#4285F4', fontWeight: 600 }}>G</span>
-          <span>Google</span>
-        </button>
-        <button className="sso-btn" onClick={loginWithCognito}>
-          <span style={{ color: '#1877F2', fontWeight: 600 }}>f</span>
-          <span>Facebook</span>
-        </button>
-        <div className="footer">
-          New to MeetingAI? <a href="#" style={{ color: '#2D8CFF' }}>Sign Up Free</a>
         </div>
       </div>
     </div>
